@@ -1,32 +1,7 @@
-const options = {
-  projectId: "project-paul-the-octopus"
-};
-const bigquery = new require("@google-cloud/bigquery")(options);
-const storage = new require("@google-cloud/storage")(options);
-const _ = require("lodash");
-const bucket = "ciandt_projectoctopus_2018_dmatoso";
-let fifaRank = [];
-let cupTeams = [];
-let cupMatches = [];
-let cupMatchesWithFriends = [];
-let historicalMatches = [];
-
-const RANK_DIFF = 2;
-
-// get close teams in rank
-function getCloseTeams(team) {
-  const teamRank = fifaRank.find(row => row.team === team);
-
-  if (teamRank) {
-    const minRank = teamRank.rank - RANK_DIFF;
-    const maxRank = teamRank.rank + RANK_DIFF;
-    return fifaRank
-      .filter(row => row.rank >= minRank && row.rank <= maxRank)
-      .map(teamData => teamData.team);
-  } else {
-    return [team];
-  }
-}
+const config = require("./config");
+const DataLoader = require("./DataLoader");
+const DataStore = require("./DataStore");
+const FifaRank = require("./FifaRank");
 
 function buildScore(matchData) {
   // find matches between team is both friend groups
@@ -98,9 +73,52 @@ function buildScore(matchData) {
   return [matchData.match.home, homeScore, awayScore, matchData.match.away];
 }
 
-function predict() {
+async function predict() {
+  // load Fifa rank
+  const fifaRank = new FifaRank(await DataLoader.loadFifaRank());
+
+  // load Cup matches
+  const cupMatches = await DataLoader.loadCupMatches();
+
+  // compute hoe and away friends for each match
+  const cupMatchesWithFriends = cupMatches.map(match => {
+    return {
+      match,
+      homeFriends: fifaRank.getCloseTeams(
+        match.home,
+        config.algorithm.rankDiff
+      ),
+      awayFriends: fifaRank.getCloseTeams(match.away, config.algorithm.rankDiff)
+    };
+  });
+
+  // put all teams and friends in a set
+  const teamsAndFriendsSet = new Set(
+    cupMatchesWithFriends.reduce((accumulator, match) => {
+      return [...accumulator, ...match.homeFriends, ...match.awayFriends];
+    }, [])
+  );
+
+  // load historical matches involving all teams
+  const historicalMatches = DataLoader.loadHistoricalMatchesByTeams(
+    Array.from(teamsAndFriendsSet)
+  );
+
+  // compute scores
+  const scores = cupMatchesWithFriends.map(m => buildScore(m));
+
+  // build csv
+  const csv =
+    "home,home_score,away_score,away\n" +
+    scores.map(row => row.join(",")).join("\n");
+
+  // save to bucket
+  const dataStore = new DataStore();
+
+  return dataStore.saveFile("predictions.csv", csv);
+
   // get 2018 teams
-  bigquery
+  /* bigquery
     .query({
       query: "SELECT TRIM(Team) as team FROM `paul_the_octopus_dataset.teams`",
       useLegacySql: false
@@ -179,7 +197,7 @@ function predict() {
     .catch(err => {
       console.log(err);
       throw err;
-    });
+    }); */
 }
 
 // To run locally, uncomment the line below and comment the exports block.
