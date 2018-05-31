@@ -1,8 +1,10 @@
-const config = require("./config");
+const config = require("../config");
 const bigquery = new require("@google-cloud/bigquery")(config);
 
 class DataLoader {
   static load(query) {
+    console.log(`[DataLoader] Loading: ${query}`);
+
     return bigquery
       .query({
         query,

@@ -1,7 +1,5 @@
 class FifaRank {
-  data = [];
-
-  constructor(data) {
+  constructor(data = []) {
     this.data = data;
   }
 
